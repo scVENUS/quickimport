@@ -1,0 +1,5 @@
+.. # currentmodule:: quickimport
+
+.. automodule:: quickimport
+
+
