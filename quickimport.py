@@ -267,7 +267,7 @@ def prepareCache(path=None, cache=None):
             files = map(normcase, listdir(dir))
         except Exception:
             continue
-        cache[dir] = set(files)
+        cache[dir] = frozenset(files)
     return cache
 
 class QuickimportFinder(object):
