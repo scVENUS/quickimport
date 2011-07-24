@@ -61,16 +61,13 @@ an entry for a zip-archive ``pythonXY.zip``. The function
    more or less untested outside the specific environment it was written for.
 
 .. autofunction:: install
-
+.. autofunction:: uninstall
 .. autofunction:: isDirRelevant
-
 .. autofunction:: prepareCache
-
 .. autofunction:: buildZip
-
+.. autofunction:: newQuickimportFinder
+.. autoclass:: NullFinder
 .. autoclass:: QuickimportFinder
-
-.. autoclass:: QuickimportFinder_NoAutoload
 
 """
 
@@ -79,12 +76,18 @@ an entry for a zip-archive ``pythonXY.zip``. The function
 from __future__ import absolute_import
 
 import sys
-from imp import acquire_lock, release_lock, find_module, get_suffixes
+from imp import acquire_lock, release_lock, find_module, get_suffixes, NullImporter
 import pkgutil
 from pkgutil import ImpLoader
 import os.path
+import re
+import runpy
 
 suffixes = [ os.path.normcase(s[0]) for s in get_suffixes() ]
+initfiles = [ os.path.normcase('__init__' + s) for s in suffixes ]
+IDENTIFIER_RE = re.compile(os.path.normcase(r'^[a-z_][a-z0-9_]*$'))
+AUTOCHACHE_KEY = object()
+
 
 __all__ = []
 
@@ -115,16 +118,8 @@ def buildZip(zipname=None):
     import collections
     import zipfile
     
-    try:
-        from quickimport import FindFastFinder as FindFastFinder2
-    except ImportError:
-        FindFastFinder2 = QuickimportFinder
-    
-    for h in sys.path_hooks[:]:
-        if isinstance(h, type) and issubclass(h, (QuickimportFinder, FindFastFinder2)):
-            sys.path_hooks.remove(h)
-            sys.path_importer_cache.clear()
-            
+    uninstall()
+                
     if zipname is None:
         for item in sys.path:
             if (os.path.isabs(item) and 
@@ -183,7 +178,17 @@ def buildZip(zipname=None):
             f.writepy(filename)
     f.close()
     LOGGER.info("Created zip archive %r", zipname)
+ 
+ 
             
+def finderIsNullFinder(finder):
+    import quickimport as q
+    return isinstance(finder, (NullFinder, q.NullFinder))
+
+def finderIsQuickimportFinder(finder):
+    import quickimport as q
+    return isinstance(finder, (QuickimportFinder, q.QuickimportFinder ))
+
 
 def isDirRelevant(dir):
     """
@@ -197,48 +202,92 @@ def isDirRelevant(dir):
     :rtype: bool
     
     """
-    if sys.path_importer_cache.get(dir, True) is not None:
+    finder = sys.path_importer_cache.get(dir)
+    if finderIsNullFinder(finder) or isinstance(finder, NullImporter):
+        # We will never import from this directory
+        return False
+
+    if finderIsQuickimportFinder(finder):
         return True
 
-    if not os.path.isabs(dir):
+    if getattr(sys, "quickimport_cache", {}).get(dir):
+        # It's in the cache. Therefore it is relevant
         return True
+    
+    relevant, files = readAndAnalyseDir(dir, True)
+    return relevant or files is None
+
+
+def readAndAnalyseDir(dir, doStat=None):
+    """
+    Read a given directory and check, if the directory 
+    could contain python modules or packages.
+    Test is a given directory contains any entries that
+    could be modules or packages.
+    
+    :param dir: the directory to inspect
+    :type dir: str or unicode
+    :param doStat: If ``True``, analyze the directory content more
+         thoroughly using stat-based calls.
+    :returns: A tuple, containing a boolean that indicates, 
+        if the directory might contain Python modules or packages, and
+        an list of the directory content.
+    :rtype: bool, list
+    
+    """
+    if not os.path.isabs(dir):
+        # probably not a regular path
+        return True, None
 
     isdir = os.path.isdir
     if not isdir(dir):
-        return False
+        # Not a directory at all
+        return False, None
 
     listdir = os.listdir
     try:
         files = listdir(dir)
     except Exception:
         # Dir is unreadable, assume it contains modules
-        return True
+        return True, None
 
     normcase = os.path.normcase
     # First pass: look for matching module names
     for f in files:
+        nf = normcase(f)
         for s in suffixes:
-            if normcase(f).endswith(s):
-                return True
+            if nf.endswith(s):
+                return True, files
+        if not doStat and IDENTIFIER_RE.match(nf):
+            return True, files
 
     # second pass: look for packages
-    join = os.path.join
-    initfiles = [ normcase('__init__' + s) for s in suffixes ]
-    for f in files:
-        d = join(dir,f)
-        if not isdir(d):
-            continue
-        try:
-            dfiles = listdir(d)
-        except Exception:
-            # Dir is unreadable, assume it contains modules
-            return True
-        for ff in dfiles:
-            if normcase(ff) in initfiles:
+    if doStat:
+        join = os.path.join
+        isfile = os.path.isfile
+        for f in files:
+            d = join(dir,f)
+            if not isdir(d):
+                continue
+            try:
+                dfiles = listdir(d)
+            except Exception:
+                # Dir is unreadable, assume it contains modules
                 return True
+            for ff in dfiles:
+                if normcase(ff) in initfiles and isfile(ff):
+                    return True, files
 
     # Nothing suitable found
-    return False
+    return False, files
+
+
+def updateCache(cache, dir, files):
+    """
+    Update a dir in the cache
+    """ 
+    cache[dir] = frozenset(map(os.path.normcase, files))
+
 
 def prepareCache(path=None, cache=None):
     """
@@ -256,20 +305,23 @@ def prepareCache(path=None, cache=None):
     if cache is None:
         cache = {}
         
-    isdir = os.path.isdir
-    isabs = os.path.isabs
-    listdir = os.listdir
-    normcase = os.path.normcase
     for dir in path:
-        if not isabs(dir) or not isdir(dir):
-            continue
-        try:
-            files = map(normcase, listdir(dir))
-        except Exception:
-            continue
-        cache[dir] = frozenset(files)
+        relevant, files = readAndAnalyseDir(dir, False)
+        if relevant and files:
+            updateCache(cache, dir, files)
     return cache
 
+class NullFinder(object):
+    """
+    A PEP-302 finder class for the ``sys.path_hooks`` hook.
+    
+    This class never finds anything.
+    """
+    __slots__ = ()
+    def find_module(self, fullname, path=None):
+        return None
+nullFinder = NullFinder()
+    
 class QuickimportFinder(object):
     """
     A PEP-302 finder class for the ``sys.path_hooks`` hook.
@@ -277,42 +329,14 @@ class QuickimportFinder(object):
     This class uses the directory cache ``sys.quickimport_cache``
     to store the content of directories from ``sys.path`` or 
     from package specific search path lists.
-    
-    .. py:attribute:: autocache
-        
-        If the class-attribute `autocache` is ``True``, the 
-        method :meth:`__init__` tries to add new directories 
-        to ``sys.quickimport_cache`` on the fly. If set to ``False``, 
-        :meth:`__init__` will not modify the content of ``sys.quickimport_cache``.
-        The default value of this attribute is ``True`` for class
-        :class:`QuickimportFinder` and ``False`` for class
-        :class:`QuickimportFinder_NoAutoload`.
-            
     """
     __slots__ = ("dir")
-    autocache = True
-    """
-    The autocache class attribute 
-    """
 
     def __init__(self, dir):
-        try:
-            cache = sys.quickimport_cache
-        except AttributeError:
-            pass
-        else:
-            if dir in cache:
-                self.dir = dir
-                return
-            if self.autocache:
-                prepareCache([dir], cache)
-                if dir in cache:
-                    self.dir = dir
-                    return
-        raise ImportError("no cache for %r" % (dir,))
+        self.dir = dir
             
     def find_module(self, fullname, path=None):
-        # print >> sys.stderr, "find_module (%s): %r" % (self.dir, fullname), 
+        #print >> sys.stderr, "find_module (%s): %r" % (self.dir, fullname), 
         acquire_lock()
         try:
             dir = self.dir
@@ -327,28 +351,55 @@ class QuickimportFinder(object):
                     if (basenameNormcase + s) in files:
                         break
                 else:
-                    # print >> sys.stderr, ""
+                    #print >> sys.stderr, ""
                     return None
             # this path is a candidate
             importer = sys.path_importer_cache.get(dir)
             assert importer is self
             try:
-                # print >> sys.stderr, "testing.. ",
-                return ImpLoader(fullname, *find_module(basename, [dir]))
+                #print >> sys.stderr, "testing.. ",
+                loader = ImpLoader(fullname, *find_module(basename, [dir]))
+                #print >> sys.stderr, "found"
+                return loader
             except ImportError, e:
-                # print >> sys.stderr, e
+                #print >> sys.stderr, e
                 return None
         finally:
             release_lock()
             
-class QuickimportFinder_NoAutoload(QuickimportFinder):
+    
+    
+def newQuickimportFinder(dir):
     """
-    A variant of class :class:`QuickimportFinder` with
-    :attr:`autocache` set to ``False``.
+    A PEP-302 finder factory function for the  import hook ``sys.path_hooks``. 
+    
+    This function returns a new finder object of class 
+    :class:`QuickimportFinder` or :class:`NullFinder`, if 
+    *dir* denotes a regular directory. Class :class:`NullFinder` is used,
+    if the directory does not contain any Python module or package. 
+    
+    If *dir* does not denote a regular directory, this function raises 
+    :exc:`ImportError`.
     """
-    autocache = False
+    #print >> sys.stderr, "newQuickimportFinder, dir: %r" % (dir,)
+    try:
+        cache = sys.quickimport_cache
+    except AttributeError:
+        pass
+    else:
+        if dir in cache:
+            return QuickimportFinder(dir)
+        isRelevant, files = readAndAnalyseDir(dir, False)
+        if files is not None:
+            if not isRelevant:
+                return nullFinder
+            if cache.get(AUTOCHACHE_KEY):
+                updateCache(cache, dir, files)
+                return QuickimportFinder(dir)
+    raise ImportError("no cache for %r" % (dir,))
+    
 
-def install(keepSysPath=None, noChache=None):
+def install(flags=None, dirs=None):
     """
     Install the Quickimport importer.
     
@@ -359,27 +410,84 @@ def install(keepSysPath=None, noChache=None):
     * appends the PEP-302 importer :class:`QuickimportFinder` 
       to the end of the ``sys.path_hooks`` list.
     
-    :param keepSysPath: if ``bool(keepSysPath)`` is ``True``, 
-       do not modify ``sys.path``.
-    :param noCache: if ``bool(noCache)`` is ``True``, 
-       do not modify ``sys.path_hooks``.
+    :param flags: A string that contains keywords to control 
+       the Quickimport behavior.
+    :type flags: :class:`str` or a sequence of strings
+    :param dirs: A list of directories to cache. If this parameter 
+        is not given, ``sys.path`` is used instead.
+    :type dirs: sequence of strings
+    
+    Known keywords in `flags` are 
+    are:
+    
+    ``off``
+        Disable Quickimport entirely. Useful if you encounter import 
+        problems and want to rule out any influence from Quickimport.  
+    
+    ``noCache``
+        Disable the caching of directories and the Quickimport PEP-302 
+        finder.
+    
+    ``noAutocache``
+        Disable the automatic addition of directories to the 
+        directory cache. Using this flags limits the usage of 
+        Quickimport to the directories given by the *dirs* 
+        argument.
+    
+    ``filterDirs``
+        Remove non relevant items from *dirs*. An item is 
+        not relevant, if it is a directory, that does not contain 
+        any Python modules or packages.
     """
+    if flags is None:
+        flags = ""
+    if "off" in flags:
+        return
+    
     acquire_lock()
     try:
-        if not keepSysPath:
-            sys.path[:] = filter(isDirRelevant, sys.path)
-               
-        if not noChache:
-            sys.quickimport_cache = cache = prepareCache()
-            sys.path_hooks.append(QuickimportFinder)
-            for dir in cache.keys():
-                if sys.path_importer_cache.get(dir) is None:
-                    sys.path_importer_cache.pop(dir, None)
+        if "noCache" not in flags:
+            #print >> sys.stderr, "quickimport: installing cache"
+            sys.quickimport_cache = cache = prepareCache(dirs, getattr(sys, "quickimport_cache", None))
+            cache[AUTOCHACHE_KEY] = "noAutocache" not in flags
+            
+            try:
+                sys.path_hooks.remove(newQuickimportFinder)
+            except ValueError:
+                pass        
+            sys.path_hooks.append(newQuickimportFinder)
+
+            # in case we are running this file as a script
+            for dir, finder in sys.path_importer_cache.items():
+                if (finder is None or 
+                    finderIsNullFinder(finder) or
+                    finderIsQuickimportFinder(finder)):
+                    del sys.path_importer_cache[dir]
                 else:
-                    del cache[dir]
+                    cache.pop(dir, None)
+
+        if "filterDirs" in flags:
+            ##print >> sys.stderr, "quickimport: filtering dirs"
+            if dirs is None:
+                dirs = sys.path
+            dirs[:] = filter(isDirRelevant, dirs)       
     finally:
         release_lock()
-    
+
+def uninstall():
+    """
+    Uninstall Quickimport
+    """
+    try:
+        sys.path_hooks.remove(newQuickimportFinder)
+    except ValueError:
+        pass
+    else:
+        sys.path_importer_cache.clear()
+    try:
+        del sys.quickimport_cache
+    except AttributeError:
+        pass
 
 if __name__ == '__main__':
     import logging

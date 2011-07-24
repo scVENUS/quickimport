@@ -31,7 +31,7 @@ setup(
     author_email='a.kruis@science-computing.de',
     url='http://pypi.python.org/pypi/quickimport',
     py_modules=['quickimport'],
-
+    zip_safe = True,
 
     # don't forget to add these files to MANIFEST.in too
 
@@ -63,6 +63,6 @@ Git repository: git://github.com/akruis/quickimport.git
       keywords='import pep302 performance zipimport',
       license='GNU Lesser General Public License, version 2.1 or any later version',
       platforms="any",
-      # test_suite="quickimport"
+      test_suite="testQuickimport"
     
     )
