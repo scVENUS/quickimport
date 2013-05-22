@@ -27,7 +27,7 @@ The module :mod:`quickimport` provides an improved importer for python. If
 you ever started a Python application from a lame file server (like 
 a CIFS server) you know the problem of long startup times. Usually 
 the long startup time is caused by the enormous number of 
-:c:func:`stat()` calls required to locate the module. For each directory
+:c:func:`stat()` calls required to locate a module. For each directory
 on ``sys.path`` (or on the package specific search path) and for each
 possible suffix (see function :func:`imp.get_suffixes`) Python 
 probes the existence of a module or a package using the 
