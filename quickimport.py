@@ -322,7 +322,13 @@ class NullFinder(object):
         return None
 nullFinder = NullFinder()
     
-class QuickimportFinder(object):
+# QuickimportFinder should not have to derive from
+# pkgutil.ImpImporter.  But pkg_resources in setuptools assumes
+# (without justification!) that any path-like importer will be
+# derived from pkgutil.ImpImporter.  If QuickimportFinder derives from
+# object, any attempt to use pkg_resources will fail, e.g.,
+#   python -c "__requires__='setuptools'; import pkg_resources"
+class QuickimportFinder(pkgutil.ImpImporter):
     """
     A PEP-302 finder class for the ``sys.path_hooks`` hook.
     
@@ -333,6 +339,7 @@ class QuickimportFinder(object):
     __slots__ = ("dir")
 
     def __init__(self, dir):
+        pkgutil.ImpImporter.__init__(self, dir)
         self.dir = dir
             
     def find_module(self, fullname, path=None):
