@@ -74,6 +74,7 @@ an entry for a zip-archive ``pythonXY.zip``. The function
 
 
 from __future__ import absolute_import
+from __future__ import print_function
 
 import sys
 from imp import acquire_lock, release_lock, find_module, get_suffixes, NullImporter
@@ -90,6 +91,13 @@ AUTOCHACHE_KEY = object()
 
 
 __all__ = []
+
+DEBUG=False
+
+def dbg(*args, **kwargs):
+    if DEBUG:
+        kwargs.setdefault('file', sys.stderr)
+        print(*args, **kwargs)
 
 def buildZip(zipname=None):
     """
@@ -343,7 +351,7 @@ class QuickimportFinder(pkgutil.ImpImporter):
         self.dir = dir
             
     def find_module(self, fullname, path=None):
-        #print >> sys.stderr, "find_module (%s): %r" % (self.dir, fullname), 
+        dbg("find_module (%s): %r" % (self.dir, fullname), end='')
         acquire_lock()
         try:
             dir = self.dir
@@ -358,18 +366,18 @@ class QuickimportFinder(pkgutil.ImpImporter):
                     if (basenameNormcase + s) in files:
                         break
                 else:
-                    #print >> sys.stderr, ""
+                    dbg("")
                     return None
             # this path is a candidate
             importer = sys.path_importer_cache.get(dir)
             assert importer is self
             try:
-                #print >> sys.stderr, "testing.. ",
+                dbg("testing.. ", end='')
                 loader = ImpLoader(fullname, *find_module(basename, [dir]))
-                #print >> sys.stderr, "found"
+                dbg("found")
                 return loader
             except ImportError, e:
-                #print >> sys.stderr, e
+                dbg(e)
                 return None
         finally:
             release_lock()
@@ -388,7 +396,7 @@ def newQuickimportFinder(dir):
     If *dir* does not denote a regular directory, this function raises 
     :exc:`ImportError`.
     """
-    #print >> sys.stderr, "newQuickimportFinder, dir: %r" % (dir,)
+    dbg("newQuickimportFinder, dir: %r" % (dir,))
     try:
         cache = sys.quickimport_cache
     except AttributeError:
@@ -450,11 +458,14 @@ def install(flags=None, dirs=None):
         flags = ""
     if "off" in flags:
         return
+    if "debug" in flags:
+        global DEBUG
+        DEBUG = True
     
     acquire_lock()
     try:
         if "noCache" not in flags:
-            #print >> sys.stderr, "quickimport: installing cache"
+            dbg("quickimport: installing cache")
             sys.quickimport_cache = cache = prepareCache(dirs, getattr(sys, "quickimport_cache", None))
             cache[AUTOCHACHE_KEY] = "noAutocache" not in flags
             
@@ -474,7 +485,7 @@ def install(flags=None, dirs=None):
                     cache.pop(dir, None)
 
         if "filterDirs" in flags:
-            ##print >> sys.stderr, "quickimport: filtering dirs"
+            dbg("quickimport: filtering dirs")
             if dirs is None:
                 dirs = sys.path
             dirs[:] = filter(isDirRelevant, dirs)       
