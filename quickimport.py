@@ -82,7 +82,6 @@ import pkgutil
 from pkgutil import ImpLoader
 import os.path
 import re
-import runpy
 
 suffixes = [ os.path.normcase(s[0]) for s in get_suffixes() ]
 initfiles = [ os.path.normcase('__init__' + s) for s in suffixes ]
