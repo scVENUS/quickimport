@@ -74,6 +74,7 @@ an entry for a zip-archive ``pythonXY.zip``. The function
 
 
 from __future__ import absolute_import
+from __future__ import print_function
 
 import sys
 from imp import acquire_lock, release_lock, find_module, get_suffixes, NullImporter
@@ -81,15 +82,21 @@ import pkgutil
 from pkgutil import ImpLoader
 import os.path
 import re
-import runpy
 
 suffixes = [ os.path.normcase(s[0]) for s in get_suffixes() ]
 initfiles = [ os.path.normcase('__init__' + s) for s in suffixes ]
-IDENTIFIER_RE = re.compile(os.path.normcase(r'^[a-z_][a-z0-9_]*$'))
+IDENTIFIER_RE = re.compile(os.path.normcase(r'^[a-zA-Z_][a-zA-Z0-9_]*$'))
 AUTOCHACHE_KEY = object()
 
 
 __all__ = []
+
+DEBUG=False
+
+def dbg(*args, **kwargs):
+    if DEBUG:
+        kwargs.setdefault('file', sys.stderr)
+        print(*args, **kwargs)
 
 def buildZip(zipname=None):
     """
@@ -322,7 +329,13 @@ class NullFinder(object):
         return None
 nullFinder = NullFinder()
     
-class QuickimportFinder(object):
+# QuickimportFinder should not have to derive from
+# pkgutil.ImpImporter.  But pkg_resources in setuptools assumes
+# (without justification!) that any path-like importer will be
+# derived from pkgutil.ImpImporter.  If QuickimportFinder derives from
+# object, any attempt to use pkg_resources will fail, e.g.,
+#   python -c "__requires__='setuptools'; import pkg_resources"
+class QuickimportFinder(pkgutil.ImpImporter):
     """
     A PEP-302 finder class for the ``sys.path_hooks`` hook.
     
@@ -333,10 +346,11 @@ class QuickimportFinder(object):
     __slots__ = ("dir")
 
     def __init__(self, dir):
+        pkgutil.ImpImporter.__init__(self, dir)
         self.dir = dir
             
     def find_module(self, fullname, path=None):
-        #print >> sys.stderr, "find_module (%s): %r" % (self.dir, fullname), 
+        dbg("find_module (%s): %r" % (self.dir, fullname), end='')
         acquire_lock()
         try:
             dir = self.dir
@@ -351,18 +365,18 @@ class QuickimportFinder(object):
                     if (basenameNormcase + s) in files:
                         break
                 else:
-                    #print >> sys.stderr, ""
+                    dbg("")
                     return None
             # this path is a candidate
             importer = sys.path_importer_cache.get(dir)
             assert importer is self
             try:
-                #print >> sys.stderr, "testing.. ",
+                dbg("testing.. ", end='')
                 loader = ImpLoader(fullname, *find_module(basename, [dir]))
-                #print >> sys.stderr, "found"
+                dbg("found")
                 return loader
             except ImportError, e:
-                #print >> sys.stderr, e
+                dbg(e)
                 return None
         finally:
             release_lock()
@@ -381,7 +395,7 @@ def newQuickimportFinder(dir):
     If *dir* does not denote a regular directory, this function raises 
     :exc:`ImportError`.
     """
-    #print >> sys.stderr, "newQuickimportFinder, dir: %r" % (dir,)
+    dbg("newQuickimportFinder, dir: %r" % (dir,))
     try:
         cache = sys.quickimport_cache
     except AttributeError:
@@ -443,11 +457,14 @@ def install(flags=None, dirs=None):
         flags = ""
     if "off" in flags:
         return
+    if "debug" in flags:
+        global DEBUG
+        DEBUG = True
     
     acquire_lock()
     try:
         if "noCache" not in flags:
-            #print >> sys.stderr, "quickimport: installing cache"
+            dbg("quickimport: installing cache")
             sys.quickimport_cache = cache = prepareCache(dirs, getattr(sys, "quickimport_cache", None))
             cache[AUTOCHACHE_KEY] = "noAutocache" not in flags
             
@@ -467,7 +484,7 @@ def install(flags=None, dirs=None):
                     cache.pop(dir, None)
 
         if "filterDirs" in flags:
-            ##print >> sys.stderr, "quickimport: filtering dirs"
+            dbg("quickimport: filtering dirs")
             if dirs is None:
                 dirs = sys.path
             dirs[:] = filter(isDirRelevant, dirs)       
