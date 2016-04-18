@@ -1,20 +1,20 @@
 About Quickimport
 =================
 
-The module quickimport provides an improved importer for python. If 
-you ever started a Python application from a lame file server (like 
+The module quickimport provides an improved importer for python. If
+you ever started a Python application from a lame file server (like
 a CIFS server) you know the problem of long startup times. The quickimport
-importer uses the PEP-302 import hooks to reduce the number of 
+importer uses the PEP-302 import hooks to reduce the number of
 failing stat system calls for each loaded module.
 
 The code was developed as part of a commercial project and released as free
-software under the GNU Lesser General Public License by 
-science + computing ag. The software is copyrighted by 
+software under the GNU Lesser General Public License by
+science + computing ag. The software is copyrighted by
 science + computing ag.
 
-Why did we decide to make Quickimport free software? We utilise Python and 
+Why did we decide to make Quickimport free software? We utilise Python and
 other open source products a lot. Therefore we think it is just fair
-to release enhancements back to the public. 
+to release enhancements back to the public.
 
 
 Requirements
@@ -22,8 +22,8 @@ Requirements
 
 * Python 2.7 (may work on earlier versions too)
 
-(Sorry, currently no Python 3 support)  
- 
+(Sorry, currently no Python 3 support)
+
 
 Installation
 ------------
@@ -35,14 +35,14 @@ git clone git://github.com/akruis/quickimport.git
 Using Quickimport
 -----------------
 
-Invoke the function quickimport.install() early during application 
+Invoke the function quickimport.install() early during application
 startup. You can use a .pth-file to do it.
 
 
 Support
 =======
 There is currently no support available, but you can drop me a mail.
-a [dot] kruis [at] science-computing [dot] de  
+a [dot] kruis [at] science-computing [dot] de
 
 Plan
 ====
@@ -51,11 +51,17 @@ No further plans currently
 Changes
 =======
 
-
+Version 0.0.2
+-------------
+Bugfixes from John Salmon
+  * Allow module names that start with uppercase.
+  * QuickimportFinder derives from pkgutil.ImpImporter
+  * Add a 'debug' flag and a dbg() function instead of commented-out print.
+  * Don't import runpy.
 
 Version 0.0.1
 -------------
-Initial version, released by science + computing ag. This version is more or 
+Initial version, released by science + computing ag. This version is more or
 less a copy of a module from the flowGuide2 source code. The code works
 for the specific requirements of flowGuide2, but has not been tested outside
-of the flowGuide2 environment. 
+of the flowGuide2 environment.
