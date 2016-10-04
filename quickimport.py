@@ -182,7 +182,14 @@ def buildZip(zipname=None):
     
     for filename in files.itervalues():
         if filename is not None:
-            f.writepy(filename)
+            try:       
+                f.writepy(filename)
+            except RuntimeError, e:
+                LOGGER.debug("Exclude %r, because of RuntimeError: %s", filename, e)
+                continue
+            except IOError, e:
+                LOGGER.debug("Exclude %r, because of IOError: %s", filename, e)
+                continue
     f.close()
     LOGGER.info("Created zip archive %r", zipname)
  
